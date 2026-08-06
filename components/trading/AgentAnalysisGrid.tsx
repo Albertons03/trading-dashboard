@@ -1,9 +1,11 @@
 import { AgentCard } from "./AgentCard";
+import type {NewsSentimentResponse} from "@/lib/sentiment/types";
+import { SentimentAgentCard } from "./SentimentAgentCard";
 
 interface AgentAnalysisGridProps {
   macro: string | undefined;
   technical: string | undefined;
-  sentiment: string | undefined;
+  sentiment: NewsSentimentResponse | null;
 }
 
 export function AgentAnalysisGrid({
@@ -15,7 +17,7 @@ export function AgentAnalysisGrid({
     <div className="grid grid-cols-3 gap-4 mb-6">
       <AgentCard title="Macro" icon="🌍" content={macro} />
       <AgentCard title="Technical" icon="📈" content={technical} />
-      <AgentCard title="Sentiment" icon="📰" content={sentiment} />
+      <SentimentAgentCard title="Sentiment" icon="📰" content={sentiment} />
     </div>
   );
 }

@@ -43,6 +43,27 @@ export interface User {
   updated_at: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  user_id: string;
+  content: string;
+  conversation_id: string | null;
+  role: 'user' | 'system';
+  created_at: string;
+  updated_at: string;
+}
+
+export type ChatMessageInsert = Omit<
+  ChatMessage,
+  'id' | 'created_at' | 'updated_at'
+> & {
+  conversation_id?: string | null;
+};
+
+export type ChatMessageUpdate = Partial<
+  Omit<ChatMessage, 'id' | 'created_at' | 'updated_at'>
+>;
+
 export interface Organization {
   id: string;
   name: string;
@@ -604,6 +625,12 @@ export type Database = {
         Row: PracticeProductEmbedding;
         Insert: PracticeProductEmbeddingInsert;
         Update: PracticeProductEmbeddingUpdate;
+        Relationships: [];
+      };
+      chat_messages: {
+        Row: ChatMessage;
+        Insert: ChatMessageInsert;
+        Update: ChatMessageUpdate;
         Relationships: [];
       };
     };

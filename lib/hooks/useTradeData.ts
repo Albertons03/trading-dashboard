@@ -1,18 +1,10 @@
 import { useEffect, useState } from "react";
+import type {BiasResponse} from "@/lib/types/bias";
 
-export type TradeData = {
-  btcPrice: number;
-  solPrice: number;
-  headlines: string[];
-  fearGreed: { value: number; classification: string };
-  macro: string;
-  technical: string;
-  sentiment: string;
-  decision: string;
-};
+
 
 export function useTradeData() {
-  const [data, setData] = useState<TradeData | null>(null);
+  const [data, setData] = useState<BiasResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,8 +12,12 @@ export function useTradeData() {
     async function load() {
       try {
         const res = await fetch("/api/bias");
-        const data: TradeData = await res.json();
-        console.log("BIAS API teljes válasz:", data);
+        const data: BiasResponse = await res.json();
+
+        console.log("[Page] decision from API:", data.decision);
+
+        console.log("[Page] sentiment from API:", data.sentiment);
+
         setData(data);
       } catch (err) {
         console.error(err);

@@ -20,12 +20,21 @@
 
 import OpenAI from 'openai'
 import { fetchAllMarketData, hasValidMarketData } from '@/lib/market-data'
+import { calculateTradeQuality } from "@/lib/decision/calculateTradeQuality";
+import {parseDecisionResponse} from '@/lib/decision/parseDecision'
+import type { BiasResponse } from '@/lib/types/bias'
+//import type { MarketDecision } from "@/lib/decision/types";
 import {
   buildMacroPrompt,
   buildTechnicalPrompt,
   buildSentimentPrompt,
   buildDecisionPrompt,
 } from '@/lib/prompts'
+import {
+  calculateWeightedSentiment,
+  getOverallSentimentLabel,
+  parseSentimentResponse,
+} from '@/lib/sentiment'
 
 // =====================================================
 // TÍPUSOK
@@ -42,22 +51,10 @@ import {
  * 
  * Most: TypeScript ellenőrzi, hogy minden mező helyes-e.
  */
-export type BiasResponse = {
-  btcPrice: number
-  solPrice: number
-  headlines: string[]
-  macro: string
-  technical: string
-  sentiment: string
-  decision: string
-}
+
 
 /** Három agent elemzésének összefogó típusa */
-type AgentAnalyses = {
-  macro: string
-  technical: string
-  sentiment: string
-}
+
 
 // =====================================================
 // OPENAI KLIENS
@@ -107,6 +104,21 @@ async function callAgent(prompt: string): Promise<string> {
     return 'Error'
   }
 }
+
+async function callJsonAgent(prompt: string): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    })
+
+    return response.choices[0]?.message?.content ?? "{}"
+  } catch (error) {
+    console.error("❌ [Bias API] JSON agent error:", error)
+    return "{}"
+  }
+}
 // =====================================================
 // SEGÉDFÜGGVÉNY: Döntéshozó AI hívás (JSON output)
 // =====================================================
@@ -146,7 +158,7 @@ async function callDecisionAgent(prompt: string): Promise<string> {
  * @param reason - A hiba oka
  * @returns BiasResponse objektum "No data" értékekkel
  */
-function createErrorResponse(reason: string): BiasResponse {
+function createErrorResponse(): BiasResponse {
   return {
     btcPrice: 0,
     solPrice: 0,
@@ -154,7 +166,7 @@ function createErrorResponse(reason: string): BiasResponse {
     macro: 'No data',
     technical: 'No data',
     sentiment: 'No data',
-    decision: reason,
+    decision: null,
   }
 }
 
@@ -186,26 +198,79 @@ export async function GET(): Promise<Response> {
   // Nincs értelme az AI-t hívni, ha nincs árfolyam adat
   if (!hasValidMarketData(marketData)) {
     return Response.json(
-      createErrorResponse('⚠️ Network error – cannot fetch market data')
+      createErrorResponse()
     )
   }
 
   // ── 3. AI agent-ek párhuzamos meghívása ──────────
   // Mindhárom agent egyszerre indul (Promise.all).
   // A callAgent már kezeli a hibákat (saját try/catch).
-  const [macro, technical, sentiment] = await Promise.all([
+  const [macro, technical, sentimentRaw] = await Promise.all([
     callAgent(buildMacroPrompt(marketData)),
     callAgent(buildTechnicalPrompt(marketData)),
-    callAgent(buildSentimentPrompt( marketData.headlines)),
-  ])
+    callJsonAgent(buildSentimentPrompt(marketData.headlines)),
+  ]) 
+   // console.log("Bias sentimentRaw:", sentimentRaw);
+  const parsedSentiment = parseSentimentResponse(sentimentRaw)
 
+if (!parsedSentiment) {
+  console.error(
+    '⚠️ Sentiment parse failed; falling back to raw sentiment string.'
+  )
+}
 
+const normalizedSentiment = parsedSentiment
+  ? (() => {
+      const overallWeightedScore = calculateWeightedSentiment(
+        parsedSentiment.items
+      );
+
+      return {
+        ...parsedSentiment,
+        overallWeightedScore,
+        overallSentiment: getOverallSentimentLabel(
+          overallWeightedScore
+        ),
+        confidence: Math.round(parsedSentiment.confidence),
+      };
+    })()
+  : null;
+
+console.log(
+  '[Bias API] normalized sentiment:',
+  normalizedSentiment
+)
+
+const sentimentForPrompt = normalizedSentiment
+  ? JSON.stringify(normalizedSentiment)
+  : sentimentRaw
 
   // ── 4. Döntéshozó AI meghívása ──────────────────
   // Összegzi a 3 elemzést és hozza meg a végső döntést
   const decision = await callDecisionAgent(
-    buildDecisionPrompt(marketData, macro, technical, sentiment)
+    buildDecisionPrompt(marketData, macro, technical, sentimentForPrompt)
   )
+
+  console.log("[Bias API] raw decision:", decision);
+
+  const parsedDecision = parseDecisionResponse(decision)
+
+  console.log("[Bias API] parsed decision:", parsedDecision)
+ 
+
+  if (parsedDecision) {
+  const llmTradeQuality = parsedDecision.tradeQuality;
+
+  const calculatedTradeQuality = calculateTradeQuality(
+    parsedDecision.confidence,
+    parsedDecision.action
+  );
+
+  console.log({
+    llmTradeQuality,
+    calculatedTradeQuality,
+  });
+}
 
   // ── 5. Válasz összeállítása ──────────────────────
   // A típus (BiasResponse) garantálja, hogy nem hagytunk ki
@@ -216,7 +281,7 @@ export async function GET(): Promise<Response> {
     headlines: marketData.headlines,
     macro,
     technical,
-    sentiment,
-    decision,
+    sentiment: normalizedSentiment,
+    decision: parsedDecision,
   } satisfies BiasResponse)
 }
